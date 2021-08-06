@@ -11,7 +11,7 @@
 int main(void)
 {
 	CLK_DIV_BAUD_DBG[0]   = 100000000/115200;
-
+	// CLK_DIV_BAUD_UART[0]  = 100000000/115200;
 	sleep(1);
 
 	// HEADER: 	5 bytes. => 2 bytes initial + 1 byte protocol select + 2 bytes protocol message size.
@@ -30,7 +30,7 @@ int main(void)
 	int receiving_done = 0;
 	u16 message_size = 0;
 
-	u8 msg_uart[18];
+	u8 msg_uart[13];
 	u8 valid_uart_msg_size = 0;
 	//u8 msg_iic[16];
 	//u8 msg_spi[16];
@@ -42,27 +42,30 @@ int main(void)
 	{
 		while((RX_BUF_EMPTY_DBG[0] == 0))
 		{
-
+			//TX_BUF_DATA_DBG[0] = RX_BUF_DATA_DBG[0] ;
 			// Save all the header data first. There are some specifications that we need in the header.
 			if(header_data_counter<5 && receiving_done == 0)
 			{
 				header_specs[header_data_counter] = RX_BUF_DATA_DBG[0];
-				//TX_BUF_DATA[0] = header_specs[header_data_counter];
+				//TX_BUF_DATA_DBG[0] = header_specs[1];
 				header_data_counter = header_data_counter + 1;
 			}
 
 			// Case header_specs[2] == 00 means we will use UART protocol to communicate.
-			else if(header_data_counter == 5 && header_specs[2] == 00 && receiving_done == 0)
+			else if(header_data_counter == 5 && header_specs[2] == 0x00 && receiving_done == 0)
 			{
 				//message received properly. check sum is correct.
 				msg_uart[message_counter] = RX_BUF_DATA_DBG[0];
 				check_sum = check_sum + msg_uart[message_counter];
-					if(message_counter == 18)
+				message_counter = message_counter + 1;
+				//TX_BUF_DATA_DBG[0] = msg_uart[0];
+					if(message_counter == 13)
 					{
 						message_counter = 0;
 						receiving_done = 1;
 					}
 			}
+
 	/*
 			// Case header_specs[2] == 01 means we will use IIC protocol to communicate.
 			else if(header_data_counter == 5 && header_specs[2] == 01 && receiving_done == 0)
@@ -91,8 +94,10 @@ int main(void)
 		}
 
 
+				//TX_BUF_DATA_DBG[0] = header_specs[1];
+					//TX_BUF_DATA_DBG[0] =receiving_done;
 
-		if(header_specs[0] == 0xAA && header_specs[1] == 0x55 )//&& receiving_done == 1)
+		if(header_specs[0] == 0xAA && header_specs[1] == 0x55 && receiving_done == 1 )
 		{
 			valid_initials = true;
 		}
@@ -105,21 +110,26 @@ int main(void)
 			// UART communication is active.
 			if(msg_uart[0] == 1)
 			{
-				CLK_DIV_BAUD_UART[0]  = 100000000/115200;
-				TX_BUF_DATA_UART[0] = header_specs[0];
+				TX_BUF_DATA_UART[0] = msg_uart[10];
 			}
 			// RS232 communication is active.
-			if(msg_uart[16] == 1)
+			else if(msg_uart[16] == 1)
 			{
 				CLK_DIV_BAUD_RS232[0] = 100000000/115200;
+				sleep(1);
 				TX_BUF_DATA_RS232[0] = header_specs[0];
 			}
 			// RS422 communication is active.
-			if(msg_uart[32] == 1)
+			else if(msg_uart[32] == 1)
 			{
 				CLK_DIV_BAUD_RS422[0] = 100000000/115200;
+				sleep(1);
 				TX_BUF_DATA_RS422[0] = header_specs[0];
 			}
+
+		}
+		else
+		{
 
 		}
 
