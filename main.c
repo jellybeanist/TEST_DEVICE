@@ -8,10 +8,20 @@
 #include <stdbool.h>
 // device slave addr, r/w,
 
+u8 rxBuffer[10000];
+u8 checkByte = 0xEE;
+u16 messageSize_u16=0;
+u32 BaudRate,BaudRate_2,BaudRate_3;
+int dataCounter,messageDataCounter,checkSum = 0;
+int messageSize = 0;
+
+
+
+
 int main(void)
 {
-	CLK_DIV_BAUD_DBG[0]   = 100000000/115200;
-	// CLK_DIV_BAUD_UART[0]  = 100000000/115200;
+	CLK_DIV_BAUD_DBG[0]   	= 100000000/115200;
+	//CLK_DIV_BAUD_UART[0]   	= 100000000/115200;
 	sleep(1);
 
 	// HEADER: 	5 bytes. => 2 bytes initial + 1 byte protocol select + 2 bytes protocol message size.
@@ -25,183 +35,139 @@ int main(void)
 
 	// SPI:
 
-	int header_data_counter,data_counter,message_counter = 0; // after receiving first 8 bits of the package, these variables should be zeroed.
-	//int *message_array_ptr;
-	int receiving_done = 0;
-	u16 message_size = 0;
-
-	u8 msg_uart[13];
-	u8 valid_uart_msg_size = 0;
-	//u8 msg_iic[16];
-	//u8 msg_spi[16];
-	u8 header_specs[5];
-	u8 check_sum = 0; // should be zeroed after getting the whole package.
-	bool valid_initials = false;
 
 	while (1)
 	{
-		while((RX_BUF_EMPTY_DBG[0] == 0))
-		{
-			//TX_BUF_DATA_DBG[0] = RX_BUF_DATA_DBG[0] ;
-			// Save all the header data first. There are some specifications that we need in the header.
-			if(header_data_counter<5 && receiving_done == 0)
-			{
-				header_specs[header_data_counter] = RX_BUF_DATA_DBG[0];
-				//TX_BUF_DATA_DBG[0] = header_specs[1];
-				header_data_counter = header_data_counter + 1;
-			}
 
-			// Case header_specs[2] == 00 means we will use UART protocol to communicate.
-			else if(header_data_counter == 5 && header_specs[2] == 0x00 && receiving_done == 0)
+		if(RX_BUF_EMPTY_UART[0] == 0)
+		{
+			//TX_BUF_DATA_DBG[0] = 0x00;
+			TX_BUF_DATA_DBG[0] = RX_BUF_DATA_UART[0];
+		}
+
+		if(RX_BUF_EMPTY_DBG[0] == 0)
+		{
+			if (dataCounter == 0 && RX_BUF_DATA_DBG[0] == 0x55)
 			{
-				//message received properly. check sum is correct.
-				msg_uart[message_counter] = RX_BUF_DATA_DBG[0];
-				check_sum = check_sum + msg_uart[message_counter];
-				message_counter = message_counter + 1;
-				//TX_BUF_DATA_DBG[0] = msg_uart[0];
-					if(message_counter == 13)
+				rxBuffer[dataCounter] = RX_BUF_DATA_DBG[0];
+				dataCounter++;
+			}
+			else if (dataCounter == 1 && RX_BUF_DATA_DBG[0] == 0xAA)
+			{
+				rxBuffer[dataCounter] = RX_BUF_DATA_DBG[0];
+				dataCounter++;
+			}
+			else if (dataCounter == 2 && (RX_BUF_DATA_DBG[0] == 0x00 || RX_BUF_DATA_DBG[0] == 0x01 || RX_BUF_DATA_DBG[0] == 0x02))
+			{
+				rxBuffer[dataCounter] = RX_BUF_DATA_DBG[0];
+				dataCounter++;
+			}
+			else if (dataCounter > 2 && dataCounter <= 4)
+			{
+				rxBuffer[dataCounter] = RX_BUF_DATA_DBG[0];
+				messageSize = (int)(16*rxBuffer[3] + rxBuffer[4]);
+				dataCounter++;
+			}
+			else if (5 <= dataCounter && (messageDataCounter <= messageSize))
+			{
+
+				rxBuffer[dataCounter] = RX_BUF_DATA_DBG[0];
+				checkSum = (checkSum + rxBuffer[dataCounter])%256;
+				//TX_BUF_DATA_DBG[0] = rxBuffer[dataCounter];
+				TX_BUF_DATA_DBG[0] = checkSum;
+				TX_BUF_DATA_DBG[0] = messageDataCounter;
+				TX_BUF_DATA_DBG[0] = messageSize;
+
+					if((messageDataCounter == messageSize) && (checkSum == checkByte)) // CC = 204
 					{
-						message_counter = 0;
-						receiving_done = 1;
-					}
-			}
+						TX_BUF_DATA_DBG[0] = 0xAF;
+						// UART based.
+						if (rxBuffer[2] == 0x00)
+						{
+							// UART enabled.
+							if(rxBuffer[5] == 1)
+							{
+								BaudRate = (rxBuffer[6] << 24) + (rxBuffer[7] << 16) + (rxBuffer[8] << 8) + (rxBuffer[9]);
+								CLK_DIV_BAUD_UART[0] = 100000000/BaudRate;
+								CLK_DIV_BAUD_RS232[0] = 100000000/BaudRate_2;
+								sleep(1);
 
-	/*
-			// Case header_specs[2] == 01 means we will use IIC protocol to communicate.
-			else if(header_data_counter == 5 && header_specs[2] == 01 && receiving_done == 0)
-			{
-				msg_iic[message_counter] = RX_BUF_DATA_DBG[0];
-				check_sum = check_sum + msg_iic[message_counter];
-					if(message_counter == 16)
+								TX_BUF_DATA_UART[0] = 0xAA;
+								TX_BUF_DATA_RS232[0] = 0xAA;
+							}
+
+							// RS232 enabled.
+							if(rxBuffer[21] == 1)
+							{
+								BaudRate_2 = (rxBuffer[22] << 24) + (rxBuffer[23] << 16) + (rxBuffer[24] << 8) + (rxBuffer[25]);
+								CLK_DIV_BAUD_RS232[0] = 100000000/BaudRate_2;
+								sleep(1);
+
+								TX_BUF_DATA_RS232[0] = 0xAB;
+							}
+
+							// RS422 enabled.
+							if(rxBuffer[37] == 1)
+							{
+								BaudRate_3 = (rxBuffer[38] << 24) + (rxBuffer[39] << 16) + (rxBuffer[40] << 8) + (rxBuffer[41]);
+								CLK_DIV_BAUD_RS422[0] = 100000000/BaudRate_3;
+								sleep(1);
+
+								TX_BUF_DATA_RS422[0] = 0xAC;
+							}
+						}
+						
+						else if (rxBuffer[2] == 0x01)
+						{
+							
+						}
+
+
+						/*
+						// SPI
+						if (rxBuffer[2] == 0x02)
+						{
+
+						}
+						*/
+					}
+
+					else
 					{
-						message_counter = 0;
-						receiving_done = 1;
+						dataCounter++;
+						messageDataCounter++;
 					}
+
+
 			}
-			// Case header_specs[2] == 02 means we will use SPI protocol to communicate.
-			else if(header_data_counter == 5 && header_specs[2] == 02 && receiving_done == 0)
+			else
 			{
-				msg_spi[message_counter] = RX_BUF_DATA_DBG[0];
-				check_sum = check_sum + msg_spi[message_counter];
-					if(message_counter == 16)
-					{
-						message_counter = 0;
-						receiving_done = 1;
-					}
+				for (int i=0; i<messageSize; i++)
+				{
+					rxBuffer[i] = 0;
+				}
+				dataCounter = 0;
+				messageDataCounter = 0;
+				checkSum = 0;
 			}
-*/
-
 		}
-
-
-				//TX_BUF_DATA_DBG[0] = header_specs[1];
-					//TX_BUF_DATA_DBG[0] =receiving_done;
-
-		if(header_specs[0] == 0xAA && header_specs[1] == 0x55 && receiving_done == 1 )
-		{
-			valid_initials = true;
-		}
-
-		// Protocol select = 00. UART or UART based RS232/RS422 will be used.
-		if(valid_initials == true && header_specs[2] == 00)
-		{
-			valid_uart_msg_size = header_specs[5];
-
-			// UART communication is active.
-			if(msg_uart[0] == 1)
-			{
-				TX_BUF_DATA_UART[0] = msg_uart[10];
-			}
-			// RS232 communication is active.
-			else if(msg_uart[16] == 1)
-			{
-				CLK_DIV_BAUD_RS232[0] = 100000000/115200;
-				sleep(1);
-				TX_BUF_DATA_RS232[0] = header_specs[0];
-			}
-			// RS422 communication is active.
-			else if(msg_uart[32] == 1)
-			{
-				CLK_DIV_BAUD_RS422[0] = 100000000/115200;
-				sleep(1);
-				TX_BUF_DATA_RS422[0] = header_specs[0];
-			}
-
-		}
-		else
-		{
-
-		}
-
-
-
-
-	}
-return 0;
-}
-
-
 
 
 
 /*
-
-if(RX_BUF_EMPTY[0] == 0)
-{
-	//TX_BUF_DATA[0] = rxdata;
-	//TX_BUF_DATA[0] = RX_BUF_DATA[0];
-
-	if(data_counter == 0 && rxdata == 0xAA)
-	{
-		header_specs[data_counter] = rxdata;
-		data_counter = data_counter + 1;
-		//TX_BUF_DATA[0] = header_specs[0];
-	}
-
-	else if(data_counter == 1 && header_specs[0] == 0xAA)
-	{
-		header_specs[data_counter] = rxdata;
-		data_counter = data_counter + 1;
-		//TX_BUF_DATA[0] = header_specs[1];
-	}
-
-	else if (header_specs[0] == 0xAA && header_specs[1] == 0x55 && data_counter < 8)
-	{
-		header_specs[data_counter] = rxdata;
-		data_counter = data_counter + 1;
-
-		if(data_counter == 8)
+		if(RX_BUF_EMPTY_RS232[0] == 0)
 		{
-			//TX_BUF_DATA[0] = header_specs[0];
-			//TX_BUF_DATA[0] = header_specs[1];
-			//TX_BUF_DATA[0] = header_specs[2];
-			//TX_BUF_DATA[0] = header_specs[3];
-			//TX_BUF_DATA[0] = header_specs[4];
-			//TX_BUF_DATA[0] = header_specs[5];
-			//TX_BUF_DATA[0] = header_specs[6];
-			TX_BUF_DATA[0] = header_specs[7];
-			data_counter = 0;
+			TX_BUF_DATA_DBG[0] = RX_BUF_DATA_RS232[0];
 		}
-	}
 
-	else//control statement, will not be used later.
-		TX_BUF_DATA[0] = 0xBC;
-
-}
-else
-{
-		//TX_BUF_DATA[0] = 0xCB;
-}
-
+		if(RX_BUF_EMPTY_RS422[0] == 0)
+		{
+			TX_BUF_DATA_DBG[0] = RX_BUF_DATA_RS422[0];
+		}
 */
 
-		/*if ([0] == 1)
-				CLK_DIV_BAUD_U0[0] = 100000000/1,2,3,4;
-				sleep(1);
-				TX_BUF_DATA_U0[0] = 5;
-		if([6] == 1)
-				CLK_DIV_BAUD_U1[0] = 100000000/7,8,9,10;
-				sleep(1);
-				TX_BUF_DATA_U1[0] = 11;
-				*/
+	}
+	return 0;
+}
+
 
