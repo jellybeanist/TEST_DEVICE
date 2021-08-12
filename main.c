@@ -10,11 +10,49 @@
 
 u8 rxBuffer[10000];
 u8 checkByte = 0xEE;
+u8 IIC_devAddr;
+u8 IIC_regAddr;
+u8 IIC_data0;
+u8 IIC_data1;
+u8 IIC_receivedData;
 u16 messageSize_u16=0;
-u32 BaudRate,BaudRate_2,BaudRate_3;
+u32 BaudRate_UART,BaudRate_RS232,BaudRate_RS422;
 int dataCounter,messageDataCounter,checkSum = 0;
 int messageSize = 0;
 
+
+XStatus IIC_MCP4725_Write(u8 devAddr, u8 regAddr, u8 data0, u8 data1)
+{
+	u8 wrData[4];
+
+	wrData[0] = devAddr;
+	wrData[1] = regAddr;
+	wrData[2] = data0;
+	wrData[3] = data1;
+
+	/* register write single byte */
+	if(XIic_Send(I2C_DEVICE_BASE_ADDR, devAddr, wrData, sizeof(wrData), XIIC_STOP) != sizeof(wrData))
+	{
+		return XST_FAILURE;
+	}
+	return XST_SUCCESS;
+}
+
+
+XStatus IIC_MCP4725_Read(u8 deviceAddr, u8 regAddr, u8* dataPtr, u8 dataCount)
+{
+	/* register select */
+	if(XIic_Send(I2C_DEVICE_BASE_ADDR, deviceAddr, &regAddr, 2, XIIC_STOP) != 1)
+	{
+		return XST_FAILURE;
+	}
+	/* register read */
+	if(XIic_Recv(I2C_DEVICE_BASE_ADDR, MCP4725_DEV_ADDRESS, dataPtr, dataCount, XIIC_STOP) != dataCount)
+	{
+		return XST_FAILURE;
+	}
+	return XST_SUCCESS;
+}
 
 
 
@@ -36,6 +74,8 @@ int main(void)
 	// SPI:
 
 
+	//IIC_MCP4725_Write(0x40,0x0F,0x00);
+	//if (IIC_QMC5883_Read(0x00, datas, 8) == XST_FAILURE)
 	while (1)
 	{
 
@@ -78,48 +118,61 @@ int main(void)
 				TX_BUF_DATA_DBG[0] = messageDataCounter;
 				TX_BUF_DATA_DBG[0] = messageSize;
 
-					if((messageDataCounter == messageSize) && (checkSum == checkByte)) // CC = 204
+					if((messageDataCounter == messageSize) && (checkSum == checkByte)) // checkSum == EE
 					{
-						TX_BUF_DATA_DBG[0] = 0xAF;
 						// UART based.
 						if (rxBuffer[2] == 0x00)
 						{
 							// UART enabled.
 							if(rxBuffer[5] == 1)
 							{
-								BaudRate = (rxBuffer[6] << 24) + (rxBuffer[7] << 16) + (rxBuffer[8] << 8) + (rxBuffer[9]);
-								CLK_DIV_BAUD_UART[0] = 100000000/BaudRate;
-								CLK_DIV_BAUD_RS232[0] = 100000000/BaudRate_2;
+								BaudRate_UART = (rxBuffer[6] << 24) + (rxBuffer[7] << 16) + (rxBuffer[8] << 8) + (rxBuffer[9]);
+								CLK_DIV_BAUD_UART[0] = 100000000/BaudRate_UART;
 								sleep(1);
-
 								TX_BUF_DATA_UART[0] = 0xAA;
-								TX_BUF_DATA_RS232[0] = 0xAA;
 							}
 
 							// RS232 enabled.
 							if(rxBuffer[21] == 1)
 							{
-								BaudRate_2 = (rxBuffer[22] << 24) + (rxBuffer[23] << 16) + (rxBuffer[24] << 8) + (rxBuffer[25]);
-								CLK_DIV_BAUD_RS232[0] = 100000000/BaudRate_2;
+								BaudRate_RS232 = (rxBuffer[22] << 24) + (rxBuffer[23] << 16) + (rxBuffer[24] << 8) + (rxBuffer[25]);
+								CLK_DIV_BAUD_RS232[0] = 100000000/BaudRate_RS232;
 								sleep(1);
-
 								TX_BUF_DATA_RS232[0] = 0xAB;
 							}
 
 							// RS422 enabled.
 							if(rxBuffer[37] == 1)
 							{
-								BaudRate_3 = (rxBuffer[38] << 24) + (rxBuffer[39] << 16) + (rxBuffer[40] << 8) + (rxBuffer[41]);
-								CLK_DIV_BAUD_RS422[0] = 100000000/BaudRate_3;
+								BaudRate_RS422 = (rxBuffer[38] << 24) + (rxBuffer[39] << 16) + (rxBuffer[40] << 8) + (rxBuffer[41]);
+								CLK_DIV_BAUD_RS422[0] = 100000000/BaudRate_RS422;
 								sleep(1);
-
 								TX_BUF_DATA_RS422[0] = 0xAC;
 							}
 						}
-						
+
+						// IIC
 						else if (rxBuffer[2] == 0x01)
 						{
-							
+							if(rxBuffer[5] == 0) // Read Mode => rxBuffer[2] == 0
+							{
+
+
+							}
+
+							if(rxBuffer[5] == 1) // Write Mode => rxBuffer[2] == 1
+							{
+								IIC_devAddr = rxBuffer[6];
+								IIC_regAddr = rxBuffer[7];
+								IIC_data0 = rxBuffer[8];
+								IIC_data1 = rxBuffer[9];
+
+								TX_BUF_DATA_DBG[0] = IIC_devAddr;
+								TX_BUF_DATA_DBG[0] = IIC_regAddr;
+								TX_BUF_DATA_DBG[0] = IIC_data0;
+								TX_BUF_DATA_DBG[0] = IIC_data1;
+								//IIC_MCP4725_Write(IIC_devAddr, IIC_regAddr, IIC_data0, IIC_data1);
+							}
 						}
 
 
@@ -170,4 +223,68 @@ int main(void)
 	return 0;
 }
 
+
+
+
+
+/*
+
+if(RX_BUF_EMPTY[0] == 0)
+{
+	//TX_BUF_DATA[0] = rxdata;
+	//TX_BUF_DATA[0] = RX_BUF_DATA[0];
+
+	if(data_counter == 0 && rxdata == 0xAA)
+	{
+		header_specs[data_counter] = rxdata;
+		data_counter = data_counter + 1;
+		//TX_BUF_DATA[0] = header_specs[0];
+	}
+
+	else if(data_counter == 1 && header_specs[0] == 0xAA)
+	{
+		header_specs[data_counter] = rxdata;
+		data_counter = data_counter + 1;
+		//TX_BUF_DATA[0] = header_specs[1];
+	}
+
+	else if (header_specs[0] == 0xAA && header_specs[1] == 0x55 && data_counter < 8)
+	{
+		header_specs[data_counter] = rxdata;
+		data_counter = data_counter + 1;
+
+		if(data_counter == 8)
+		{
+			//TX_BUF_DATA[0] = header_specs[0];
+			//TX_BUF_DATA[0] = header_specs[1];
+			//TX_BUF_DATA[0] = header_specs[2];
+			//TX_BUF_DATA[0] = header_specs[3];
+			//TX_BUF_DATA[0] = header_specs[4];
+			//TX_BUF_DATA[0] = header_specs[5];
+			//TX_BUF_DATA[0] = header_specs[6];
+			TX_BUF_DATA[0] = header_specs[7];
+			data_counter = 0;
+		}
+	}
+
+	else//control statement, will not be used later.
+		TX_BUF_DATA[0] = 0xBC;
+
+}
+else
+{
+		//TX_BUF_DATA[0] = 0xCB;
+}
+
+*/
+
+		/*if ([0] == 1)
+				CLK_DIV_BAUD_U0[0] = 100000000/1,2,3,4;
+				sleep(1);
+				TX_BUF_DATA_U0[0] = 5;
+		if([6] == 1)
+				CLK_DIV_BAUD_U1[0] = 100000000/7,8,9,10;
+				sleep(1);
+				TX_BUF_DATA_U1[0] = 11;
+				*/
 
