@@ -23,12 +23,11 @@ int messageSize = 0;
 
 XStatus IIC_MCP4725_Write(u8 devAddr, u8 regAddr, u8 data0, u8 data1)
 {
-	u8 wrData[4];
+	u8 wrData[3];
 
-	wrData[0] = devAddr;
-	wrData[1] = regAddr;
-	wrData[2] = data0;
-	wrData[3] = data1;
+	wrData[0] = regAddr;
+	wrData[1] = data0;
+	wrData[2] = data1;
 
 	/* register write single byte */
 	if(XIic_Send(I2C_DEVICE_BASE_ADDR, devAddr, wrData, sizeof(wrData), XIIC_STOP) != sizeof(wrData))
@@ -47,7 +46,7 @@ XStatus IIC_MCP4725_Read(u8 deviceAddr, u8 regAddr, u8* dataPtr, u8 dataCount)
 		return XST_FAILURE;
 	}
 	/* register read */
-	if(XIic_Recv(I2C_DEVICE_BASE_ADDR, MCP4725_DEV_ADDRESS, dataPtr, dataCount, XIIC_STOP) != dataCount)
+	if(XIic_Recv(I2C_DEVICE_BASE_ADDR, deviceAddr, dataPtr, dataCount, XIIC_STOP) != dataCount)
 	{
 		return XST_FAILURE;
 	}
@@ -114,9 +113,9 @@ int main(void)
 				rxBuffer[dataCounter] = RX_BUF_DATA_DBG[0];
 				checkSum = (checkSum + rxBuffer[dataCounter])%256;
 				//TX_BUF_DATA_DBG[0] = rxBuffer[dataCounter];
-				TX_BUF_DATA_DBG[0] = checkSum;
-				TX_BUF_DATA_DBG[0] = messageDataCounter;
-				TX_BUF_DATA_DBG[0] = messageSize;
+				//TX_BUF_DATA_DBG[0] = checkSum;
+				//TX_BUF_DATA_DBG[0] = messageDataCounter;
+				//TX_BUF_DATA_DBG[0] = messageSize;
 
 					if((messageDataCounter == messageSize) && (checkSum == checkByte)) // checkSum == EE
 					{
@@ -154,24 +153,25 @@ int main(void)
 						// IIC
 						else if (rxBuffer[2] == 0x01)
 						{
-							if(rxBuffer[5] == 0) // Read Mode => rxBuffer[2] == 0
+							if(rxBuffer[5] == 0x00) // Read Mode => rxBuffer[2] == 0
 							{
 
 
 							}
 
-							if(rxBuffer[5] == 1) // Write Mode => rxBuffer[2] == 1
+							if(rxBuffer[5] == 0x01) // Write Mode => rxBuffer[2] == 1
 							{
 								IIC_devAddr = rxBuffer[6];
 								IIC_regAddr = rxBuffer[7];
 								IIC_data0 = rxBuffer[8];
 								IIC_data1 = rxBuffer[9];
 
-								TX_BUF_DATA_DBG[0] = IIC_devAddr;
-								TX_BUF_DATA_DBG[0] = IIC_regAddr;
-								TX_BUF_DATA_DBG[0] = IIC_data0;
-								TX_BUF_DATA_DBG[0] = IIC_data1;
-								//IIC_MCP4725_Write(IIC_devAddr, IIC_regAddr, IIC_data0, IIC_data1);
+								//TX_BUF_DATA_DBG[0] = IIC_devAddr;
+								//TX_BUF_DATA_DBG[0] = IIC_regAddr;
+								//TX_BUF_DATA_DBG[0] = IIC_data0;
+								//TX_BUF_DATA_DBG[0] = IIC_data1;
+								IIC_MCP4725_Write(IIC_devAddr, IIC_regAddr, IIC_data0, IIC_data1);
+								//sleep(10);
 							}
 						}
 
