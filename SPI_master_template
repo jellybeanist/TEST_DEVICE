@@ -1,0 +1,277 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+
+entity SPI_MASTER is
+
+    Generic
+    (   
+        CLK_FREQ            : integer := 100_000_000;
+        SCLK_FREQ           : integer := 1_000_000;
+        CPHA                : STD_LOGIC := '0';
+        CPOL                : STD_LOGIC := '0'
+    );
+    
+    Port 
+    (   
+        CLK                 : IN STD_LOGIC;
+        RST                 : IN STD_LOGIC;
+        
+        SPI_enable          : IN STD_LOGIC;
+        MOSI_data_i         : IN STD_LOGIC_VECTOR (7 downto 0); 
+        MISO_i              : IN STD_LOGIC;
+        
+        MISO_data_o         : OUT STD_LOGIC_VECTOR (7 downto 0);
+        SCLK_o              : OUT STD_LOGIC;        
+        SS_o                : OUT STD_LOGIC;
+        MOSI_o              : OUT STD_LOGIC;
+        SPI_data_ready_o    : OUT STD_LOGIC
+        
+    );
+end SPI_MASTER;
+
+architecture Behavioral of SPI_MASTER is
+
+constant edge_counter_lim_div2 : integer := CLK_FREQ/((SCLK_FREQ)*2);
+type states is (IDLE, TRANSFER);
+signal state : states := IDLE;
+
+signal write_reg    : std_logic_vector (7 downto 0) := (others => '0');
+signal read_reg     : std_logic_vector (7 downto 0) := (others => '0');
+signal pha_pol      : std_logic_vector (1 downto 0) := (others => '0');
+signal mosi_en      : std_logic := '0';
+signal miso_en      : std_logic := '0';
+
+signal sclk         : std_logic := '0';
+signal sclk_en      : std_logic := '0';
+signal sclk_prev    : std_logic := '0';
+signal sclk_rising  : std_logic := '0';
+signal sclk_falling : std_logic := '0';
+
+signal once         : std_logic := '0';
+signal edge_counter : integer range 0 to edge_counter_lim_div2;
+signal counter      : integer range 0 to 15 := 0; 
+
+
+begin
+pha_pol <= CPHA & CPOL;
+
+--Clock edge detection process.
+    process (sclk, sclk_prev) begin
+        if (sclk = '1' and sclk_prev = '0') then
+            sclk_rising <= '1';
+            sclk_falling <= '0';
+        else 
+            sclk_rising <= '0';
+            sclk_falling <= '0';
+        end if;
+
+        if (sclk = '0' and sclk_prev = '1') then
+            sclk_rising <= '0';
+            sclk_falling <= '1';
+        else 
+            sclk_rising <= '0';
+            sclk_falling <= '0';
+        end if;
+        
+    end process;
+    
+-- Mode select based on phase and polarity. Timing will change in every mode.    
+    process (pha_pol, sclk_rising, sclk_falling) begin
+        case pha_pol is
+        
+            when "00" =>
+                mosi_en <= sclk_falling;
+                miso_en <= sclk_rising;
+                
+            when "00" =>
+                mosi_en <= sclk_falling;
+                miso_en <= sclk_rising;
+                    
+            when "01" =>
+                mosi_en <= sclk_rising;
+                miso_en <= sclk_falling;
+                        
+            when "10" =>
+                mosi_en <= sclk_rising;
+                miso_en <= sclk_falling;
+                            
+            when "11" =>
+                mosi_en <= sclk_falling;
+                miso_en <= sclk_rising;
+                
+            when others =>
+        end case;
+    end process;
+    
+    process (CLK) begin
+        if (rising_edge(CLK)) then
+            SPI_data_ready_o <= '0';
+            sclk_prev <= sclk;
+            
+                case state is
+                    when IDLE =>
+                        SS_o <= '1';
+                        MOSI_o <= '1';
+                        SPI_data_ready_o <= '0';
+                        sclk_en <= '1';
+                        counter <= 0;    
+                        
+                        if (CPOL = '0') then
+                            SCLK_o <= '0';
+                        else 
+                            SCLK_o <= '1';
+                        end if;
+                        
+                        if (SPI_enable = '1') then
+                            state <= TRANSFER;
+                            sclk_en <= '1';
+                            write_reg <= MOSI_data_i;
+                            MOSI_o <= MOSI_data_i(7);
+                            read_reg <= x"00";
+                        end if;
+                        
+                    when TRANSFER =>
+                        SS_o <= '0';
+                        MOSI_o <= write_reg(7);
+                        
+                        if (CPHA = '1') then
+                            if (counter = 0) then
+                                SCLK_o <= sclk;
+                                if (MISO_en = '1') then
+                                    read_reg(0) <= MISO_i;
+                                    read_reg(7 downto 1) <= read_reg(6 downto 0);
+                                    counter <= counter + 1;
+                                    once <= '1';
+                                end if;
+                            elsif (counter = 8) then
+                                if (once = '1') then
+                                    SPI_data_ready_o <= '1';
+                                    once <= '0';
+                                end if;
+                                
+                                MISO_data_o <= read_reg;
+                                
+                                if(mosi_en = '1') then
+                                    if(SPI_enable = '1') then
+                                    write_reg <= MOSI_data_i;
+                                    MOSI_o <= MOSI_data_i(7);
+                                    SCLK_o <= sclk;
+                                    counter <= 0;
+                                else
+                                    state <= IDLE;
+                                    SS_o <= '1';
+                                end if;
+                                
+                            elsif(counter = 9) then    
+                                if (miso_en = '1') then
+                                    state <= IDLE;
+                                    SS_o <= '1';
+                                end if;
+                                
+                            else
+                                SCLK_o <= sclk;
+                                
+                                if (miso_en = '1') then
+                                    read_reg(0) <= MISO_i;
+                                    read_reg(7 downto 1) <= read_reg(6 downto 0);
+                                    counter <= counter + 1;
+                                end if;
+                                
+                                if (mosi_en = '1') then
+                                    MOSI_o <= write_reg(7);
+                                    write_reg(7 downto 1) <= write_reg(6 downto 0);
+                                end if;
+                            end if;
+                            
+                            
+                        else --if (CPHA = '0') then
+                        
+                            if (counter = 0) then
+                                SCLK_o <= sclk;
+                                if (MISO_en = '1') then
+                                read_reg(0) <= MISO_i;
+                                read_reg(7 downto 1) <= read_reg(6 downto 0);
+                                counter <= counter + 1;
+                                once <= '1';
+                                end if;
+                                
+                            elsif (counter = 8) then
+                                if (once = '1') then
+                                    SPI_data_ready_o <= '1';
+                                    once <= '0';
+                                end if;
+                                
+                                MISO_data_o <= read_reg;
+                                SCLK_o <= sclk;
+                                
+                                if (mosi_en = '1') then 
+                                    if (SPI_enable = '1') then
+                                        write_reg <= MOSI_data_i;
+                                        MOSI_o <= MOSI_data_i(7);
+                                        counter <= 0;
+                                    else 
+                                        counter <= counter + 1;
+                                    end if;
+                                    
+                                    if (miso_en = '1') then 
+                                        state <= IDLE;
+                                        SS_o <= '1';
+                                    end if;
+                                    
+                                end if;
+                            
+                            elsif (counter = 9) then
+                                
+                                if (miso_en = '1') then
+                                    state <= IDLE;
+                                    SS_o <= '1';
+                                
+                                end if;
+                            
+                            else
+                                SCLK_o <= sclk;
+                                
+                                if (miso_en = '1') then
+                                    read_reg(0) <= MISO_i;
+                                    read_reg(7 downto 0) <= read_reg(6 downto 0);
+                                    counter <= counter + 1;
+                                end if;
+                                
+                                if (mosi_en = '1') then
+                                    write_reg(7 downto 1) <= write_reg(6 downto 0);
+                                end if;
+                                
+                            end if;         
+                        end if;
+                    end if;
+                end case;
+        end if;
+    end process;
+    
+    
+    process (CLK) begin
+    if (rising_edge(CLK)) then
+    
+        if (sclk_en = '1') then
+            if edge_counter = edge_counter_lim_div2-1 then
+                sclk            <= not sclk;
+                edge_counter    <= 0;
+            else
+                edge_counter    <= edge_counter + 1;
+            end if;    
+        else
+            edge_counter        <= 0;
+            if (CPOL = '0') then
+                sclk            <= '0';
+            else
+            sclk                <= '1';
+            end if;
+        end if;
+    
+    end if;
+    end process;
+
+end Behavioral;
